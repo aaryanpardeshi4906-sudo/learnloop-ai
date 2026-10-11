@@ -19,4 +19,4 @@ frontend/dist/
 # Miscellaneous
 *.jpeg
 *.jpg
-*.png
+*.png.env 
