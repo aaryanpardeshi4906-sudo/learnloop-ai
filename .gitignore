@@ -1,0 +1,22 @@
+# Virtual Environment
+backend/venv/
+venv/
+ENV/
+
+# Python Cache
+**/__pycache__/
+*.pyc
+
+# Environment Secrets
+.env
+backend/.env
+frontend/.env.local
+
+# Node & Build artifacts
+frontend/node_modules/
+frontend/dist/
+
+# Miscellaneous
+*.jpeg
+*.jpg
+*.png
