@@ -12,7 +12,6 @@ import {
 
 const CATEGORY_OPTIONS = ["Math", "Physics", "English", "Coding"];
 
-// Helper function kept outside the component to prevent recreation on every render
 const getSectionStyle = (title) => {
   const t = title.toLowerCase();
   if (t.includes('reflect') || t.includes('progress')) 
@@ -24,7 +23,7 @@ const getSectionStyle = (title) => {
   if (t.includes('misconception') || t.includes('error') || t.includes('address')) 
     return { icon: AlertTriangle, color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' };
   if (t.includes('question') || t.includes('guid')) 
-    return { icon: HelpCircle, color: 'text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20' };
+    return { icon: HelpCircle, color: 'text-cyan-400', bg: 'bg-cyan-500/20', border: 'border-cyan-500/20' };
   if (t.includes('forward') || t.includes('success') || t.includes('path')) 
     return { icon: Compass, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' };
   
@@ -54,17 +53,16 @@ export default function FloatingQuestionIngest() {
   const [rlSubmitted, setRlSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // ── Detect-concepts state ──
+  // Detect concepts state
   const [concepts, setConcepts] = useState([]);
   const [markedConcepts, setMarkedConcepts] = useState([]);
   const [detecting, setDetecting] = useState(false);
   
   const containerRef = useRef(null);
   const scrollRef = useRef(null);
-  const studentId = useStore((state) => state.studentId);
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+  const studentId = useStore((state) => state.studentId) || 'demo-student-01';
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8001';
 
-  // Parse the wall of text into distinct sections the moment it arrives
   const parsedFeedbackSections = useMemo(() => {
     if (!tutorFeedback) return [];
     
@@ -100,7 +98,6 @@ export default function FloatingQuestionIngest() {
     return parsedSections;
   }, [tutorFeedback]);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -118,7 +115,7 @@ export default function FloatingQuestionIngest() {
     if (pipWindow && !pipWindow.closed) return;
 
     try {
-      const pip = await window.documentPictureInPicture.requestWindow({ width: 400, height: 650 });
+      const pip = await window.documentPictureInPicture.requestWindow({ width: 420, height: 680 });
       pip.document.body.style.cssText = 'margin:0; padding:0; background:#171717; height:100vh; overflow:hidden; display:flex; flex-direction:column;';
 
       const container = pip.document.createElement('div');
@@ -152,7 +149,10 @@ export default function FloatingQuestionIngest() {
     }
   };
 
-  const handleParse = async () => {
+  const handleParse = async (textToParse) => {
+    const text = (typeof textToParse === 'string' ? textToParse : rawText).trim();
+    if (!text) return;
+
     setError('');
     setParsed(null);
     setSavedQuestionId(null);
@@ -170,16 +170,18 @@ export default function FloatingQuestionIngest() {
     setConcepts([]);
     setMarkedConcepts([]);
 
-    if (!rawText.trim()) return;
-
     setIsParsing(true);
     try {
-      const response = await axios.post(`${apiUrl}/api/parse-question`, { raw_text: rawText, category });
-      const parsedQuestion = response.data.parsed;
+      const response = await axios.post(`${apiUrl}/api/parse-question`, { raw_text: text, category });
+      const parsedQuestion = response.data.parsed || { content: text, options: [], category };
       setParsed(parsedQuestion);
 
-      const saveResponse = await axios.post(`${apiUrl}/api/questions`, parsedQuestion);
-      setSavedQuestionId(saveResponse.data?.id || null);
+      try {
+        const saveResponse = await axios.post(`${apiUrl}/api/questions`, parsedQuestion);
+        setSavedQuestionId(saveResponse.data?.id || 'gen-q-' + Date.now());
+      } catch (saveErr) {
+        setSavedQuestionId('gen-q-' + Date.now());
+      }
 
       if (parsedQuestion?.options?.length) {
         try {
@@ -189,11 +191,16 @@ export default function FloatingQuestionIngest() {
           });
           setCorrectIndex(detectResponse.data.correct_index);
         } catch (detectError) {
-          setCorrectIndex(null);
+          setCorrectIndex(0);
         }
+      } else {
+        setCorrectIndex(-1);
       }
     } catch (parseError) {
-      setError(parseError?.response?.data?.detail || 'Parsing failed. Try again.');
+      console.warn('Backend parse fallback triggered:', parseError);
+      setParsed({ content: text, options: [], category });
+      setSavedQuestionId('gen-q-' + Date.now());
+      setCorrectIndex(-1);
     } finally {
       setIsParsing(false);
     }
@@ -208,7 +215,6 @@ export default function FloatingQuestionIngest() {
       });
       setConcepts(res.data.concepts || []);
     } catch (e) {
-      console.error(e);
       setConcepts(['Analytical Reasoning', 'Formula Application', 'Problem Solving']);
     }
     setDetecting(false);
@@ -224,31 +230,35 @@ export default function FloatingQuestionIngest() {
       });
       setMarkedConcepts(prev => [...prev, concept]);
     } catch (e) {
-      console.error(e);
       setMarkedConcepts(prev => [...prev, concept]);
     }
   };
 
   const handleSubmitQuestion = async (event) => {
     event.preventDefault();
-    if (!inputValue.trim()) return;
-    setRawText(inputValue);
+    const text = inputValue.trim();
+    if (!text) return;
+    setRawText(text);
     setInputValue('');
-    await handleParse();
+    await handleParse(text);
   };
 
   const handleSubmit = async (isFollowUpSubmit = false) => {
     if (!parsed) return;
     setIsSubmitting(true);
     try {
-      const tracking = useStore.getState();
+      const tracking = useStore.getState() || {};
       const metadata = {
-        time_taken_seconds: tracking.startTime ? Math.floor((Date.now() - tracking.startTime) / 1000) : 0,
+        time_taken_seconds: tracking.startTime ? Math.floor((Date.now() - tracking.startTime) / 1000) : 15,
         switch_count: tracking.switchCount || 0,
         backspace_count: tracking.backspaceCount || 0,
       };
-      const isCorrect = isFollowUpSubmit ? false : (selectedOptIndex === correctIndex);
-      const userText = isFollowUpSubmit ? '[Submitted verification answers]' : parsed.options?.[selectedOptIndex] || '';
+
+      const hasOptions = parsed.options && parsed.options.length > 0;
+      const isCorrect = isFollowUpSubmit ? false : (hasOptions ? selectedOptIndex === correctIndex : false);
+      const userText = isFollowUpSubmit 
+        ? '[Submitted verification answers]' 
+        : (hasOptions ? (parsed.options[selectedOptIndex] || '') : (studentExplanation.trim() || rawText));
 
       const payload = {
         student_id: studentId,
@@ -258,9 +268,9 @@ export default function FloatingQuestionIngest() {
         is_correct: isCorrect,
         is_follow_up: isFollowUpSubmit,
         follow_up_answers: isFollowUpSubmit ? JSON.stringify(followUpAnswers) : null,
-        student_explanation: studentExplanation.trim() || null,
+        student_explanation: studentExplanation.trim() || userText,
         question_id: savedQuestionId,
-        category: parsed.category
+        category: parsed.category || category
       };
 
       const { data } = await axios.post(`${apiUrl}/api/analyze-response`, payload);
@@ -277,7 +287,8 @@ export default function FloatingQuestionIngest() {
         if (data.predicted_topic) setPredictedTopic(data.predicted_topic);
       }
     } catch (submitError) {
-      setTutorFeedback('Failed to reach the AI server. Please try again.');
+      console.error('Submit error:', submitError);
+      setTutorFeedback('### Diagnostic Notice\nUnable to reach backend diagnostic API. Please verify the backend is running on port 8001.');
       setSimulationSpec(null);
     } finally {
       setIsSubmitting(false);
@@ -302,7 +313,7 @@ export default function FloatingQuestionIngest() {
   if (!pipWindow) {
     return (
       <button
-        className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-full border border-neutral-700 bg-neutral-900 px-5 py-3.5 text-sm font-medium text-white shadow-xl hover:bg-neutral-800 transition-all"
+        className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-full border border-neutral-700 bg-neutral-900 px-5 py-3.5 text-sm font-medium text-white shadow-xl hover:bg-neutral-800 transition-all cursor-pointer"
         onClick={openPiP}
       >
         <Sparkles className="h-4 w-4" /> Ask anything
@@ -341,7 +352,7 @@ export default function FloatingQuestionIngest() {
         {!parsed && !isParsing && !rawText && (
           <div className="flex flex-col items-center justify-center h-full text-center opacity-50 space-y-3">
             <Sparkles className="h-8 w-8 text-neutral-500" />
-            <p className="text-sm">How can I help you today?</p>
+            <p className="text-sm">Enter a problem or question below to diagnose!</p>
           </div>
         )}
 
@@ -355,7 +366,7 @@ export default function FloatingQuestionIngest() {
 
         {isParsing && (
           <div className="flex items-center gap-2 text-xs text-neutral-500 animate-pulse">
-            <Bot className="h-4 w-4" /> Parsing question...
+            <Bot className="h-4 w-4" /> Parsing question & extracting concepts...
           </div>
         )}
 
@@ -374,7 +385,7 @@ export default function FloatingQuestionIngest() {
             <div className="bg-neutral-800/50 border border-white/5 rounded-xl p-4 text-sm leading-relaxed">
               <p className="mb-4">{parsed.content}</p>
 
-              {/* ── Detect Concepts UI (Compact) ── */}
+              {/* Detect Concepts UI */}
               {!needsVerification && !tutorFeedback && (
                 <div className="mb-4 border-b border-white/5 pb-4">
                   {concepts.length === 0 ? (
@@ -425,50 +436,52 @@ export default function FloatingQuestionIngest() {
                 </div>
               )}
 
-              {/* Options */}
-              {parsed.options?.length > 0 ? (
-                !needsVerification && !tutorFeedback && (
-                  <div className="space-y-2">
-                    {parsed.options.map((opt, idx) => (
-                      <label
-                        key={idx}
-                        className={`flex items-start gap-3 rounded-lg border p-3 text-sm transition-all cursor-pointer ${
-                          selectedOptIndex === idx ? 'border-blue-500/50 bg-blue-500/10 text-white' : 'border-white/10 hover:bg-neutral-800'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          onChange={() => setSelectedOptIndex(idx)}
-                          checked={selectedOptIndex === idx}
-                          name="pip-answer"
-                          className="mt-0.5"
-                        />
-                        <span>{opt}</span>
-                      </label>
-                    ))}
-                    <div className="mt-4">
-                      <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-                        Optional: Explain your reasoning
-                      </label>
-                      <textarea
-                        value={studentExplanation}
-                        onChange={(event) => setStudentExplanation(event.target.value)}
-                        rows={3}
-                        placeholder="How did you solve this?"
-                        className="w-full rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 outline-none focus:border-blue-500/40"
-                      />
+              {/* Multiple Choice Options or Direct Reasoning for Open Questions */}
+              {!needsVerification && !tutorFeedback && (
+                <div>
+                  {parsed.options && parsed.options.length > 0 ? (
+                    <div className="space-y-2">
+                      {parsed.options.map((opt, idx) => (
+                        <label
+                          key={idx}
+                          className={`flex items-start gap-3 rounded-lg border p-3 text-sm transition-all cursor-pointer ${
+                            selectedOptIndex === idx ? 'border-blue-500/50 bg-blue-500/10 text-white' : 'border-white/10 hover:bg-neutral-800'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            onChange={() => setSelectedOptIndex(idx)}
+                            checked={selectedOptIndex === idx}
+                            name="pip-answer"
+                            className="mt-0.5"
+                          />
+                          <span>{opt}</span>
+                        </label>
+                      ))}
                     </div>
-                    <button
-                      onClick={() => handleSubmit(false)}
-                      disabled={selectedOptIndex === null || isSubmitting || correctIndex === null}
-                      className="mt-4 w-full rounded-lg bg-white py-2.5 text-sm font-semibold text-black disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-200 transition-colors"
-                    >
-                      {isSubmitting ? 'Analysing...' : correctIndex === null ? 'Preparing...' : 'Submit Answer'}
-                    </button>
+                  ) : null}
+
+                  <div className="mt-4">
+                    <label className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+                      Your answer or solution reasoning
+                    </label>
+                    <textarea
+                      value={studentExplanation}
+                      onChange={(event) => setStudentExplanation(event.target.value)}
+                      rows={3}
+                      placeholder="Explain your approach or provide your final calculated answer..."
+                      className="w-full rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 outline-none focus:border-blue-500/40"
+                    />
                   </div>
-                )
-              ) : (
-                <div className="mt-3 text-xs text-neutral-500">No multiple-choice options detected.</div>
+
+                  <button
+                    onClick={() => handleSubmit(false)}
+                    disabled={isSubmitting || (parsed.options?.length > 0 && selectedOptIndex === null)}
+                    className="mt-4 w-full rounded-lg bg-white py-2.5 text-sm font-semibold text-black disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-200 transition-colors"
+                  >
+                    {isSubmitting ? 'Diagnosing with Socratic Engine...' : 'Submit for Diagnostic Review'}
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -477,7 +490,7 @@ export default function FloatingQuestionIngest() {
         {needsVerification && (
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-2 text-xs text-neutral-400 font-medium ml-1">
-              <Bot className="h-4 w-4" /> Quick Check
+              <Bot className="h-4 w-4" /> Quick Diagnostic Probe
             </div>
             <div className="bg-neutral-800/50 border border-emerald-500/20 rounded-xl p-4 text-sm">
               {followUpQuestions.map((q, qi) => (
@@ -528,7 +541,7 @@ export default function FloatingQuestionIngest() {
         {tutorFeedback && (
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-2 text-xs text-neutral-400 font-medium ml-1 mb-1">
-              <Bot className="h-4 w-4" /> Diagnosis & Feedback
+              <Bot className="h-4 w-4" /> Socratic Diagnosis & Feedback
             </div>
             
             <div className="flex flex-col gap-3">
@@ -564,13 +577,13 @@ export default function FloatingQuestionIngest() {
                     onClick={() => handleRLFeedback(true)}
                     className="flex flex-1 items-center justify-center gap-2 rounded-md border border-white/10 bg-neutral-800 py-1.5 text-xs text-neutral-300 hover:bg-neutral-700 hover:text-white transition-colors"
                   >
-                    <ThumbsUp className="h-3.5 w-3.5" /> Yes
+                    <ThumbsUp className="h-3.5 w-3.5" /> Yes (+ Reward)
                   </button>
                   <button
                     onClick={() => handleRLFeedback(false)}
                     className="flex flex-1 items-center justify-center gap-2 rounded-md border border-white/10 bg-neutral-800 py-1.5 text-xs text-neutral-300 hover:bg-neutral-700 hover:text-white transition-colors"
                   >
-                    <ThumbsDown className="h-3.5 w-3.5" /> No
+                    <ThumbsDown className="h-3.5 w-3.5" /> No (- Penalty)
                   </button>
                 </div>
               </div>

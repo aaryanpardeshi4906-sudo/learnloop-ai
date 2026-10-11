@@ -10,28 +10,74 @@ function engineLabel(engine) {
   return 'Plotly';
 }
 
+const getCuratedReference = (caption = '', title = '') => {
+  const query = `${caption} ${title}`.toLowerCase();
+
+  if (query.includes('rectangle') || query.includes('perimeter') || query.includes('area') || query.includes('geometry')) {
+    return {
+      url: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=800&q=80",
+      caption: "Real-world reference: Rectangular athletic field bounded by perimeter touchlines enclosing 2D surface area."
+    };
+  }
+
+  if (query.includes('motion') || query.includes('velocity') || query.includes('kinematic') || query.includes('speed') || query.includes('acceleration')) {
+    return {
+      url: "https://images.unsplash.com/photo-1517649763962-0c623266ddc0?auto=format&fit=crop&w=800&q=80",
+      caption: "Real-world reference: Linear track sprint dynamics representing position, velocity, and rate of acceleration."
+    };
+  }
+
+  if (query.includes('derivative') || query.includes('parabola') || query.includes('curve') || query.includes('slope') || query.includes('tangent')) {
+    return {
+      url: "https://images.unsplash.com/photo-1509228468518-180dd4864904?auto=format&fit=crop&w=800&q=80",
+      caption: "Real-world reference: Trajectory curvature and slope demonstrating instantaneous rate of change."
+    };
+  }
+
+  return {
+    url: "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?auto=format&fit=crop&w=800&q=80",
+    caption: caption || "Conceptual educational diagram model."
+  };
+};
+
 export default function SimulationView({ simulation }) {
   if (!simulation || typeof simulation !== 'object') return null;
 
   const [plotlyFailed, setPlotlyFailed] = useState(false);
   const engine = simulation.engine || 'plotly';
   const stack = simulation.python_stack || {};
-  const apiBaseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+  const apiBaseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8001').replace(/\/$/, '');
+  
   const manim = simulation.manim || {};
   const videoUrl = manim.video_url
-    ? (manim.video_url.startsWith('http') ? manim.video_url : `${apiBaseUrl}${manim.video_url}`)
+    ? (manim.video_url.startsWith('http') ? manim.video_url : `${apiBaseUrl}${manim.video_url.startsWith('/') ? '' : '/'}${manim.video_url}`)
     : null;
   const isImageMedia = !!videoUrl && /\.(png|jpe?g|webp)$/i.test(videoUrl.split('?')[0]);
-  const referenceImageUrl = simulation.reference_image_url || null;
-  const referenceImageCaption = simulation.reference_image_caption || 'Relatable concept reference image';
+
+  const curated = useMemo(() => {
+    return getCuratedReference(simulation.reference_image_caption || '', simulation.title || '');
+  }, [simulation.reference_image_caption, simulation.title]);
+
+  let referenceImageUrl = simulation.reference_image_url || null;
+  if (referenceImageUrl && !referenceImageUrl.startsWith('http')) {
+    referenceImageUrl = `${apiBaseUrl}${referenceImageUrl.startsWith('/') ? '' : '/'}${referenceImageUrl}`;
+  }
+  if (!referenceImageUrl) {
+    referenceImageUrl = curated.url;
+  }
+
+  const finalCaption = curated.caption;
+
   const plotlyFigure = useMemo(() => {
     const figure = simulation.plotly_figure;
     if (!figure || typeof figure !== 'object') return null;
     if (!Array.isArray(figure.data)) return null;
     return figure;
   }, [simulation]);
+
   const equationText = simulation.equation_display || simulation.equation_latex || simulation.expression;
   const derivativeText = simulation.derivative_display || simulation.derivative_latex || 'Unavailable';
+
   const PlotComponent = useMemo(() => {
     const candidate = Plot?.default || Plot;
     const isRenderableFunction = typeof candidate === 'function';
@@ -121,15 +167,19 @@ export default function SimulationView({ simulation }) {
       )}
 
       {referenceImageUrl && (
-        <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-3">
+        <div className="mt-4 rounded-xl border border-cyan-500/20 bg-neutral-900/60 p-3">
           <p className="mb-2 text-xs uppercase tracking-wider text-cyan-300">Relatable Reference</p>
           <img
-            className="w-full rounded-lg border border-white/10 object-cover"
+            className="w-full h-48 rounded-lg border border-white/10 object-cover bg-neutral-950"
             src={referenceImageUrl}
-            alt={referenceImageCaption}
+            alt={finalCaption}
             loading="lazy"
+            onError={(e) => {
+              e.target.onerror = null;
+              e.target.src = "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=800&q=80";
+            }}
           />
-          <p className="mt-2 text-xs text-neutral-300">{referenceImageCaption}</p>
+          <p className="mt-2 text-xs text-neutral-300">{finalCaption}</p>
         </div>
       )}
 

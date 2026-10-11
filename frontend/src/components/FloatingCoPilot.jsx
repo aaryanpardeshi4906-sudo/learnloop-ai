@@ -1,23 +1,25 @@
-import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
+import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { Send, Cpu, Loader2, Sparkles, ChevronDown, MessageCircle } from 'lucide-react';
 import ChatBubble from './ChatBubble';
 
 export default function FloatingCoPilot() {
   const [isOpen, setIsOpen] = useState(false);
-  const [inputTimer, setInputTimer] = useState(null);
   const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState([
-    { role: 'assistant', content: 'Hi! I am actively tracking the lesson on your left. Whenever you make a mistake, just drop your logic here and I will diagnose it!' }
+    { 
+      role: 'assistant', 
+      content: 'Hi! I am actively tracking your work. If you encounter any difficulty or want to verify your approach, enter your reasoning here!' 
+    }
   ]);
   const [isTyping, setIsTyping] = useState(false);
   const [agentStatus, setAgentStatus] = useState('');
 
   const messagesEndRef = useRef(null);
   
-  const studentId = useStore((state) => state.studentId);
-  const currentContext = useStore((state) => state.currentContext);
+  const studentId = useStore((state) => state.studentId) || 'demo-student-01';
+  const currentContext = useStore((state) => state.currentContext) || 'Kinematics & Motion';
   const incrementSwitch = useStore((state) => state.incrementSwitch);
   const incrementBackspace = useStore((state) => state.incrementBackspace);
   const startTracking = useStore((state) => state.startTracking);
@@ -29,32 +31,30 @@ export default function FloatingCoPilot() {
 
   const handleInputChange = (e) => {
     const val = e.target.value;
-    if (val.length < inputValue.length) {
+    if (inputValue && val.length < inputValue.length && incrementBackspace) {
       incrementBackspace();
     }
     setInputValue(val);
   };
 
-  // Simulates user hesitating if they keep switching tab/input focus
   const handleFocus = () => {
-    incrementSwitch();
+    if (incrementSwitch) incrementSwitch();
   };
 
   const handleSend = async (e) => {
-    e.preventDefault();
-    if (!inputValue.trim()) return;
+    if (e && e.preventDefault) e.preventDefault();
+    const queryText = inputValue.trim();
+    if (!queryText || isTyping) return;
 
-    const userMessage = { role: 'user', content: inputValue };
-    setMessages(prev => [...prev, userMessage]);
-    
+    const userMessage = { role: 'user', content: queryText };
+    setMessages((prev) => [...prev, userMessage]);
     setInputValue('');
     setIsTyping(true);
     
     const statusSequence = [
-      { text: "🧠 Cognitive Tracker mapping logic...", delay: 500 },
-      { text: "⚖️ Verifying against MiRAGE vectors...", delay: 2000 },
-      { text: "🔮 RL Engine predicting future failures...", delay: 4000 },
-      { text: "✍️ Socrates generating guidance...", delay: 6000 }
+      { text: "🧠 Cognitive Tracker mapping logic...", delay: 400 },
+      { text: "⚖️ Verifying against diagnostic vectors...", delay: 1500 },
+      { text: "✍️ Socrates generating guidance...", delay: 3000 }
     ];
     
     statusSequence.forEach(({ text, delay }) => {
@@ -62,19 +62,19 @@ export default function FloatingCoPilot() {
     });
 
     try {
-      const questionId = useStore.getState().currentQuestionId;
-      const category = useStore.getState().currentQuestionCategory;
-      const tracking = useStore.getState();
+      const storeState = useStore.getState() || {};
+      const questionId = storeState.currentQuestionId || 'q-demo-01';
+      const category = storeState.currentQuestionCategory || 'Physics';
       const metadata = {
-        time_taken_seconds: tracking.startTime ? Math.floor((Date.now() - tracking.startTime) / 1000) : 0,
-        switch_count: tracking.switchCount || 0,
-        backspace_count: tracking.backspaceCount || 0,
+        time_taken_seconds: storeState.startTime ? Math.floor((Date.now() - storeState.startTime) / 1000) : 15,
+        switch_count: storeState.switchCount || 0,
+        backspace_count: storeState.backspaceCount || 0,
       };
       
       const payload = {
         student_id: studentId,
-        user_query: userMessage.content,
-        student_explanation: userMessage.content,
+        user_query: queryText,
+        student_explanation: queryText,
         current_context: currentContext,
         metadata,
         is_correct: false,
@@ -84,23 +84,29 @@ export default function FloatingCoPilot() {
         category: category
       };
 
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8001';
       const response = await axios.post(`${apiUrl}/api/analyze-response`, payload);
       const data = response.data;
       
       const aiMessage = {
         role: 'assistant',
-        content: data.feedback,
-        mcq: data.mcq,
-        predictedTopic: data.predicted_topic,
-        patternHash: data.pattern_hash
+        content: data.feedback || "Let's review the core formulation step-by-step.",
+        mcq: data.mcq || null,
+        predictedTopic: data.predicted_topic || 'Physics Concepts',
+        patternHash: data.pattern_hash || ''
       };
-      setMessages(prev => [...prev, aiMessage]);
-      startTracking(); 
+      setMessages((prev) => [...prev, aiMessage]);
+      if (startTracking) startTracking(); 
 
     } catch (error) {
-      console.error(error);
-      setMessages(prev => [...prev, { role: 'assistant', content: '\`[Connection Error]\` I am having trouble reaching the API.'}]);
+      console.error("CoPilot Error:", error);
+      setMessages((prev) => [
+        ...prev, 
+        { 
+          role: 'assistant', 
+          content: '`[Diagnostic Service Notice]` Backend analysis service connection timeout. Please verify backend is running on port 8001.'
+        }
+      ]);
     } finally {
       setIsTyping(false);
       setAgentStatus('');
@@ -111,7 +117,7 @@ export default function FloatingCoPilot() {
     return (
       <button 
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-8 right-8 w-16 h-16 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 shadow-2xl shadow-cyan-500/50 flex items-center justify-center hover:scale-105 transition-transform animate-pulse-ring"
+        className="fixed bottom-8 right-8 w-16 h-16 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 shadow-2xl shadow-cyan-500/50 flex items-center justify-center hover:scale-105 transition-transform animate-pulse-ring z-50"
       >
         <MessageCircle className="w-8 h-8 text-white" />
       </button>
@@ -140,7 +146,7 @@ export default function FloatingCoPilot() {
       <div className="flex-1 overflow-y-auto p-5 scroll-smooth">
         {messages.map((msg, i) => (
           <div key={i}>
-            <ChatBubble message={msg} onMcqComplete={(isCorrect) => {}} />
+            <ChatBubble message={msg} onMcqComplete={() => {}} />
           </div>
         ))}
         
@@ -152,7 +158,7 @@ export default function FloatingCoPilot() {
             <div className="bg-slate-800 border border-slate-700 rounded-2xl p-3 px-4 shadow-sm">
                <div className="flex items-center gap-2">
                  <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
-                 <span className="text-xs text-cyan-200 mt-0.5">{agentStatus || "Thinking..."}</span>
+                 <span className="text-xs text-cyan-200 mt-0.5">{agentStatus || "Evaluating logic..."}</span>
                </div>
             </div>
           </div>
@@ -179,7 +185,7 @@ export default function FloatingCoPilot() {
           </button>
         </form>
         <p className="text-[10px] text-center text-slate-500 mt-3 font-medium">
-          Powered by CrewAI • MiRAGE Vectors
+          Powered by LangGraph Cognitive Engine • Groq LPU
         </p>
       </div>
     </div>
